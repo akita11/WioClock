@@ -5,6 +5,8 @@
 #include <TFT_eSPI.h> // Hardware-specific library
 //#include <EnergySaving.h>
 
+// Use Seeed's official RTC library whose version is after 2020/10/21.
+
 TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
 
 float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
@@ -27,8 +29,8 @@ boolean initial = 1;
 #define WS 50
 #define WZ1 85
 #define WZ2 110
-#define RH 3
-#define RM 5
+#define RH 5
+#define RM 3
 #define COLOR_H TFT_WHITE
 #define COLOR_M TFT_CYAN
 #define COLOR_S TFT_RED
@@ -58,10 +60,11 @@ int time_slot_color[] = {0x9A60, TFT_RED, TFT_ORANGE, TFT_YELLOW, TFT_GREEN, TFT
 // NTP client: https://beta-notes.way-nifty.com/blog/2020/08/post-3484c0.html
 
 #define WIFI_SSID     "YOUR_SSID"
-#define WIFI_PASSWORD "YOUR_PASSWD"
+#define WIFI_PASSWORD "YOUR_PWD"
 
 #define NTP_SERVER "210.173.160.27" // ntp1.jst.mfeed.ad.jp 
 const int NTP_PACKET_SIZE = 48;
+boolean fNTPadjusted = 0;
 
 DateTime now;
 RTC_SAMD51 rtc;
@@ -196,6 +199,7 @@ boolean fDisplayBackLight = true;
 
 int Ton = 0;
 boolean fPIR = false;
+int NTPadjustH, NTPadjustM;
 
 void loop()
 {
@@ -224,24 +228,23 @@ void loop()
     }
     while (digitalRead(WIO_KEY_B) == LOW) delay(10);
   }
+#define DRAW_STEP_SECOND 1
   if (targetTime < millis()) {
+    DateTime now;
+    now = rtc.now();
     if (fPIR == true) {
       Ton = 0;
     }
     else {
-      if (Ton == 30) { // 10sec * 30 = 300sec (5min)
+      if (Ton == DRAW_STEP_SECOND * 300) { // 300sec (5min)
         digitalWrite(LCD_BACKLIGHT, LOW); fDisplayBackLight = false;
       }
       else Ton++;
     }
     fPIR = false;
 
-#define DRAW_STEP_SECOND 30
-
     targetTime += DRAW_STEP_SECOND * 1000;
 
-    DateTime now;
-    now = rtc.now();
     // Pre-compute hand degrees, x & y coords for a fast screen update
     //    sdeg = now.second() * 6;                // 0-59 -> 0-354
     sdeg = 0;
@@ -249,7 +252,6 @@ void loop()
     hdeg = now.hour() * 30 + mdeg / 12.0; // 0-11 -> 0-360 - includes minutes and seconds
     if (now.second() < DRAW_STEP_SECOND || initial) {
       Serial.println("----");
-      Serial.println(initial);
       Serial.println(now.hour());
       Serial.println(now.minute());
       initial = 0;
@@ -341,5 +343,18 @@ void loop()
         Serial.print(now.second(), DEC);
         Serial.println();
     */
+
+    // NTP adjust at 00:00 every day
+//    Serial.print(fNTPadjusted); Serial.print(' '); Serial.println(now.minute());
+    if (now.hour() == 0 && now.minute() == 0 && fNTPadjusted == false) {
+      NTPadjustH = now.hour(); NTPadjustM = now.minute();
+      NTPadjust();
+      targetTime = millis();
+      DrawClockBase();
+      fNTPadjusted = true;
+    }
+    else if (fNTPadjusted == true && now.hour() != NTPadjustH && now.minute() != NTPadjustM) {
+      fNTPadjusted = false;
+    }
   }
 }
